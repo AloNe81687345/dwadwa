@@ -1,0 +1,49 @@
+name: Сборка APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Ключ подписи
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.KS_PASS }}
+        run: |
+          mkdir -p signing
+          if [ -n "$KEYSTORE_B64" ]; then echo "$KEYSTORE_B64" | base64 -d > signing/release.jks
+          else
+            echo "::warning::Секрет KEYSTORE_B64 не задан, создаю временный ключ. Обновления поверх установленного приложения могут не встать."
+            keytool -genkeypair -keystore signing/release.jks -alias shchi -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "${KS_PASS:-shchi-staff-2026}" -keypass "${KS_PASS:-shchi-staff-2026}" -dname "CN=Shchi i Borshchi, C=RU"
+          fi
+      - name: Сборка
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          KS_PASS: ${{ secrets.KS_PASS }}
+        run: gradle --no-daemon assembleRelease
+      - name: Переименовать
+        run: cp app/build/outputs/apk/release/app-release.apk shchi-staff.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shchi-staff-apk
+          path: shchi-staff.apk
+      - name: Выложить в «Releases»
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.${{ github.run_number }}
+          name: Приложение для сотрудников 1.${{ github.run_number }}
+          files: shchi-staff.apk
+          make_latest: true

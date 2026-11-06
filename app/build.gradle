@@ -1,0 +1,54 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'ru.shchiiborshchi.staff'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'ru.shchiiborshchi.staff'
+        minSdk 24
+        targetSdk 34
+        versionCode Integer.parseInt(System.getenv('VERSION_CODE') ?: '1')
+        versionName '1.' + (System.getenv('VERSION_CODE') ?: '1')
+    }
+    signingConfigs {
+        release {
+            storeFile file('../signing/release.jks')
+            storePassword System.getenv('KS_PASS') ?: 'shchi-staff-2026'
+            keyAlias 'shchi'
+            keyPassword System.getenv('KS_PASS') ?: 'shchi-staff-2026'
+        }
+    }
+    buildTypes {
+        release { minifyEnabled false; signingConfig signingConfigs.release }
+    }
+    lint { abortOnError false; checkReleaseBuilds false }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+
+// Мелодия заявки (мягкий перезвон до–ми–соль) создаётся при сборке, чтобы не хранить звуковой файл
+def chime = file('src/main/res/raw/chime.wav')
+tasks.register('genChime') {
+    outputs.file chime
+    doLast {
+        int sr = 44100; int n = (int)(3.2 * sr); double[] buf = new double[n]
+        def tone = { ff, st, ln, gg ->
+            double f = ff as double, start = st as double, len = ln as double, g = gg as double
+            int s0 = (int)(start * sr); int m = (int)(len * sr)
+            for (int i = 0; i < m && s0 + i < n; i++) {
+                double t = i / (double) sr
+                double env = Math.min(t / 0.03d, 1d) * Math.exp(-t * 2.2d)
+                buf[s0 + i] += (Math.sin(2 * Math.PI * f * t) + 0.06d * Math.sin(4 * Math.PI * f * t)) * env * g
+            }
+        }
+        tone(523.25d, 0d, 2.4d, 0.5d); tone(659.25d, 0.22d, 2.4d, 0.45d); tone(783.99d, 0.44d, 2.6d, 0.42d)
+        double mx = 0; for (double v : buf) mx = Math.max(mx, Math.abs(v))
+        chime.parentFile.mkdirs()
+        def out = new java.io.DataOutputStream(new java.io.BufferedOutputStream(new FileOutputStream(chime)))
+        def le32 = { vv -> int v = vv as int; out.write(v & 255); out.write((v >> 8) & 255); out.write((v >> 16) & 255); out.write((v >> 24) & 255) }
+        def le16 = { vv -> int v = vv as int; out.write(v & 255); out.write((v >> 8) & 255) }
+        out.writeBytes('RIFF'); le32(36 + n * 2); out.writeBytes('WAVEfmt '); le32(16); le16(1); le16(1); le32(sr); le32(sr * 2); le16(2); le16(16)
+        out.writeBytes('data'); le32(n * 2)
+        for (double v : buf) le16((int) Math.round(v / mx * 0.85d * 32767))
+        out.close()
+    }
+}
+preBuild.dependsOn 'genChime'
